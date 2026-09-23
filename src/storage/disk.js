@@ -667,6 +667,24 @@ export class DiskStorage extends Storage {
     await writeJsonAtomic(this.bucketMetaPath(bucket), meta);
   }
 
+  // ---- cors ----
+  async getBucketCors(bucket) {
+    const meta = await this._bucketMeta(bucket);
+    return meta.cors || [];
+  }
+
+  async setBucketCors(bucket, rules) {
+    const meta = await this._bucketMeta(bucket);
+    meta.cors = Array.isArray(rules) ? rules : [];
+    await writeJsonAtomic(this.bucketMetaPath(bucket), meta);
+  }
+
+  async deleteBucketCors(bucket) {
+    const meta = await this._bucketMeta(bucket);
+    delete meta.cors;
+    await writeJsonAtomic(this.bucketMetaPath(bucket), meta);
+  }
+
   // Apply the bucket lifecycle: expire objects older than Expiration.Days and
   // abort incomplete multipart uploads older than AbortIncompleteMultipartUpload.
   // Returns the number of entities removed.

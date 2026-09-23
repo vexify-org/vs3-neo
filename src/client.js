@@ -167,6 +167,32 @@ export class S3Client {
   async deleteBucketLifecycle(bucket) {
     return this.request('DELETE', `/${bucket}`, { query: { lifecycle: '' } });
   }
+
+  // ---- cors ----
+  async getBucketCors(bucket) {
+    return this.request('GET', `/${bucket}`, { query: { cors: '' } });
+  }
+  async putBucketCors(bucket, rules) {
+    return this.request('PUT', `/${bucket}`, {
+      query: { cors: '' },
+      headers: { 'Content-Type': 'application/xml' },
+      body: corsToXml(rules),
+    });
+  }
+  async deleteBucketCors(bucket) {
+    return this.request('DELETE', `/${bucket}`, { query: { cors: '' } });
+  }
+  // Preflight is unauthenticated; use a plain fetch rather than request().
+  async preflightCors(bucket, { origin, method, headers = [] } = {}) {
+    const h = {
+      Origin: origin,
+      'Access-Control-Request-Method': method,
+    };
+    if (headers.length) h['Access-Control-Request-Headers'] = headers.join(', ');
+    const res = await fetch(`${this.endpoint}/${bucket}`, { method: 'OPTIONS', headers: h });
+    const text = await res.text();
+    return { status: res.status, ok: res.ok, headers: res.headers, text };
+  }
 }
 
 function tagsToXml(tags) {
@@ -194,6 +220,24 @@ function rulesToXml(rules) {
     })
     .join('');
   return `<?xml version="1.0" encoding="UTF-8"?><LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">${inner}</LifecycleConfiguration>`;
+}
+
+function corsToXml(rules) {
+  const inner = (rules || [])
+    .map((r) => {
+      const id = r.id ? `<ID>${r.id}</ID>` : '';
+      const origins = (r.allowedOrigins || []).map((o) => `<AllowedOrigin>${o}</AllowedOrigin>`).join('');
+      const methods = (r.allowedMethods || []).map((m) => `<AllowedMethod>${m}</AllowedMethod>`).join('');
+      const headers = (r.allowedHeaders || []).map((h) => `<AllowedHeader>${h}</AllowedHeader>`).join('');
+      const expose = (r.exposeHeaders || []).map((h) => `<ExposeHeader>${h}</ExposeHeader>`).join('');
+      const maxAge =
+        r.maxAgeSeconds !== undefined && r.maxAgeSeconds !== null
+          ? `<MaxAgeSeconds>${r.maxAgeSeconds}</MaxAgeSeconds>`
+          : '';
+      return `<CORSRule>${id}${origins}${methods}${headers}${expose}${maxAge}</CORSRule>`;
+    })
+    .join('');
+  return `<?xml version="1.0" encoding="UTF-8"?><CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">${inner}</CORSConfiguration>`;
 }
 
 function cryptoHash(buf) {

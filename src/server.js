@@ -29,6 +29,7 @@ import { S3Error, toS3Error, errorXml } from './api/errors.js';
 import * as xml from './api/xml_responses.js';
 import { httpDate } from './util/xml.js';
 import { SSE_HEADER, SSE_ALGORITHM } from './util/sse.js';
+import { matchCorsRule, corsResponseHeaders, corsPreflightHeaders } from './util/cors.js';
 
 const VERSION = '1.0.0';
 
@@ -49,6 +50,9 @@ const OP_ACTIONS = {
   GetBucketLifecycle: 's3:GetLifecycleConfiguration',
   PutBucketLifecycle: 's3:PutLifecycleConfiguration',
   DeleteBucketLifecycle: 's3:PutLifecycleConfiguration',
+  GetBucketCors: 's3:GetBucketCORS',
+  PutBucketCors: 's3:PutBucketCORS',
+  DeleteBucketCors: 's3:PutBucketCORS',
   ListObjects: 's3:ListBucket',
   ListObjectsV2: 's3:ListBucket',
   ListObjectVersions: 's3:ListBucketVersions',
@@ -174,6 +178,13 @@ export class S3Server {
         this._recordStatus(res.statusCode);
         return;
       }
+      // CORS preflight carries no signature, so it is answered before auth.
+      if (n.method === 'OPTIONS') {
+        await this._handlePreflight(req, res, n);
+        this._recordStatus(res.statusCode);
+        return;
+      }
+      await this._applyCors(n, res);
       const op = this._dispatch(n);
       const identity = this._authorize(n);
       n._identity = identity;
@@ -256,6 +267,7 @@ export class S3Server {
           if ('tagging' in q) return 'GetBucketTagging';
           if ('policy' in q) return 'GetBucketPolicy';
           if ('lifecycle' in q) return 'GetBucketLifecycle';
+          if ('cors' in q) return 'GetBucketCors';
           if ('uploads' in q) return 'ListMultipartUploads';
           if ('versions' in q) return 'ListObjectVersions';
           if (q['list-type'] === '2') return 'ListObjectsV2';
@@ -265,6 +277,7 @@ export class S3Server {
           if ('tagging' in q) return 'PutBucketTagging';
           if ('policy' in q) return 'PutBucketPolicy';
           if ('lifecycle' in q) return 'PutBucketLifecycle';
+          if ('cors' in q) return 'PutBucketCors';
           return 'CreateBucket';
         case 'HEAD':
           return 'HeadBucket';
@@ -272,6 +285,7 @@ export class S3Server {
           if ('tagging' in q) return 'DeleteBucketTagging';
           if ('policy' in q) return 'DeleteBucketPolicy';
           if ('lifecycle' in q) return 'DeleteBucketLifecycle';
+          if ('cors' in q) return 'DeleteBucketCors';
           return 'DeleteBucket';
         case 'POST':
           if ('delete' in q) return 'DeleteObjects';
@@ -384,6 +398,12 @@ export class S3Server {
         return this._putBucketLifecycle(res, req, bucket);
       case 'DeleteBucketLifecycle':
         return this._deleteBucketLifecycle(res, bucket);
+      case 'GetBucketCors':
+        return this._getBucketCors(res, bucket);
+      case 'PutBucketCors':
+        return this._putBucketCors(res, req, bucket);
+      case 'DeleteBucketCors':
+        return this._deleteBucketCors(res, bucket);
       case 'NotImplemented':
         throw new S3Error('NotImplemented', 'A header you provided implies functionality that is not implemented.', 501);
       default:
@@ -730,6 +750,71 @@ export class S3Server {
     this._sendResponse(res, 204, {}, '');
   }
 
+  // ---- CORS ----
+  async _getBucketCors(res, bucket) {
+    const rules = await this.storage.getBucketCors(bucket);
+    if (!rules || rules.length === 0) {
+      throw new S3Error('NoSuchCORSConfiguration', 'The CORS configuration does not exist', 404);
+    }
+    this._sendXml(res, 200, xml.corsXml(rules));
+  }
+
+  async _putBucketCors(res, req, bucket) {
+    const body = await readBody(req);
+    const rules = extractCorsRules(body);
+    if (rules.length === 0) {
+      throw new S3Error('MalformedXML', 'The XML you provided was not well-formed or did not validate against our published schema', 400);
+    }
+    await this.storage.setBucketCors(bucket, rules);
+    this._sendResponse(res, 200, {}, '');
+  }
+
+  async _deleteBucketCors(res, bucket) {
+    await this.storage.deleteBucketCors(bucket);
+    this._sendResponse(res, 204, {}, '');
+  }
+
+  // Answer a CORS preflight. Browsers never sign OPTIONS, so this runs before
+  // authentication; the bucket CORS rules are the only access control here.
+  async _handlePreflight(req, res, n) {
+    const origin = n.headers['origin'] || '';
+    const bucket = n.segments[0] || '';
+    const method = n.headers['access-control-request-method'] || '';
+    const requested = (n.headers['access-control-request-headers'] || '')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+
+    res.setHeader('Server', 'vs3-neo/' + VERSION);
+    if (!origin || !bucket || !method) {
+      this._sendResponse(res, 400, {}, '');
+      return;
+    }
+    const rules = await this.storage.getBucketCors(bucket).catch(() => null);
+    const rule = rules ? matchCorsRule(rules, { origin, method, headers: requested }) : null;
+    if (!rule) {
+      throw new S3Error(
+        'AccessForbidden',
+        "CORSResponse: This CORS request is not allowed. This is usually because the evalution of Origin, request method / Access-Control-Request-Method or Access-Control-Request-Headers are not whitelisted by the resource's CORS spec.",
+        403,
+      );
+    }
+    this._sendResponse(res, 200, corsPreflightHeaders(rule, origin, requested), '');
+  }
+
+  // Attach CORS headers to a normal cross-origin request so the browser can
+  // read the response. Runs before dispatch so error responses carry them too.
+  async _applyCors(n, res) {
+    const origin = n.headers['origin'];
+    const bucket = n.segments[0] || '';
+    if (!origin || !bucket) return;
+    const rules = await this.storage.getBucketCors(bucket).catch(() => null);
+    if (!rules || rules.length === 0) return;
+    const rule = matchCorsRule(rules, { origin, method: n.method });
+    if (!rule) return;
+    for (const [k, v] of Object.entries(corsResponseHeaders(rule, origin))) res.setHeader(k, v);
+  }
+
   // ---- Multipart ----
   async _createMultipartUpload(res, req, bucket, key) {
     const contentType = req.headers['content-type'] || 'application/octet-stream';
@@ -1036,6 +1121,35 @@ function extractLifecycleRules(xmlStr) {
     rules.push(rule);
   }
   return rules;
+}
+
+// Parse <CORSConfiguration><CORSRule>...</CORSRule>...</CORSConfiguration>.
+function extractCorsRules(xmlStr) {
+  const rules = [];
+  const re = /<CORSRule>([\s\S]*?)<\/CORSRule>/g;
+  let m;
+  while ((m = re.exec(xmlStr || '')) !== null) {
+    const block = m[1];
+    const rule = {
+      id: extractXmlTag(block, 'ID') || undefined,
+      allowedOrigins: extractXmlTags(block, 'AllowedOrigin'),
+      allowedMethods: extractXmlTags(block, 'AllowedMethod').map((x) => x.toUpperCase()),
+      allowedHeaders: extractXmlTags(block, 'AllowedHeader'),
+      exposeHeaders: extractXmlTags(block, 'ExposeHeader'),
+    };
+    const maxAge = extractXmlTag(block, 'MaxAgeSeconds');
+    if (maxAge !== '') rule.maxAgeSeconds = parseInt(maxAge, 10);
+    rules.push(rule);
+  }
+  return rules;
+}
+
+function extractXmlTags(xmlStr, tag) {
+  const out = [];
+  const re = new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`, 'g');
+  let m;
+  while ((m = re.exec(xmlStr || '')) !== null) out.push(m[1]);
+  return out;
 }
 
 function extractNestedXmlTag(xmlStr, outer, inner) {

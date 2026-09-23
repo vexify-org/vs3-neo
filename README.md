@@ -32,6 +32,10 @@ authentication and a user-defined function (UDF) system.
   `Expiration` (object age-based deletion, honors versioning) and
   `AbortIncompleteMultipartUpload` cleanup, run on demand via
   `POST /__lifecycle`.
+- **CORS** — per-bucket `CORSConfiguration` (`Get/Put/DeleteBucketCors`)
+  with wildcard origins, headers and methods; `OPTIONS` preflight is
+  answered before authentication and matching rules also decorate normal
+  responses with the `Access-Control-*` headers.
 - **Metrics & health** — Prometheus-style `/__metrics`, plus `/__health` and
   `/__info` introspection endpoints.
 
@@ -131,10 +135,10 @@ and multipart (`createMultipartUpload`, `uploadPart`, `listParts`,
 `completeMultipartUpload`, `abortMultipartUpload`,
 `listMultipartUploads`), plus the extension points: tagging
 (`get/set/deleteObjectTagging`, `get/set/deleteBucketTagging`), bucket
-policy (`get/set/deleteBucketPolicy`) and lifecycle
-(`get/set/deleteLifecycle`, `runLifecycle`). Unimplemented extension
-methods throw `NotImplemented`, so custom backends can opt in
-incrementally.
+policy (`get/set/deleteBucketPolicy`), lifecycle
+(`get/set/deleteLifecycle`, `runLifecycle`) and CORS
+(`get/set/deleteBucketCors`). Unimplemented extension methods throw
+`NotImplemented`, so custom backends can opt in incrementally.
 
 - **disk** (`src/storage/disk.js`) — default. Objects are written to disk
   with atomic tmp-file+rename, MD5 ETags, per-object version metadata and
@@ -177,7 +181,7 @@ Example — deny deletions:
 { "functions": { "hooks": { "onDelete": "deny" } } }
 ```
 
-## Tagging, SSE, policies & lifecycle
+## Tagging, SSE, policies, lifecycle & CORS
 
 ### Object / bucket tagging
 
@@ -240,6 +244,40 @@ Expiration runs on demand:
 curl -X POST "http://localhost:9000/__lifecycle?bucket=my-bucket" -H 'Authorization: ...'
 # omit ?bucket to run all buckets; returns { "buckets": n, "removed": n }
 ```
+
+### CORS
+
+`PutBucketCors` takes a `CORSConfiguration`; rules match on origin (with
+`*` wildcards such as `https://*.example.com`), method and requested
+headers. `OPTIONS` preflights are answered without a signature, and a
+request that matches no rule is rejected with `AccessForbidden`.
+
+```sh
+curl -X PUT "http://localhost:9000/my-bucket?cors" \
+  -H 'Content-Type: application/xml' \
+  -d '<CORSConfiguration><CORSRule>
+        <AllowedOrigin>https://example.com</AllowedOrigin>
+        <AllowedMethod>GET</AllowedMethod>
+        <AllowedMethod>PUT</AllowedMethod>
+        <AllowedHeader>*</AllowedHeader>
+        <ExposeHeader>ETag</ExposeHeader>
+        <MaxAgeSeconds>3000</MaxAgeSeconds>
+      </CORSRule></CORSConfiguration>'
+```
+
+Preflight check:
+
+```sh
+curl -i -X OPTIONS "http://localhost:9000/my-bucket" \
+  -H 'Origin: https://example.com' \
+  -H 'Access-Control-Request-Method: PUT' \
+  -H 'Access-Control-Request-Headers: x-amz-meta-color'
+```
+
+Note that a rule whose `AllowedOrigin` is exactly `*` returns
+`Access-Control-Allow-Origin: *` and omits `Access-Control-Allow-Credentials`
+(the two are mutually exclusive); any other match echoes the request origin
+and allows credentials.
 
 ## Authentication
 

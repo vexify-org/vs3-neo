@@ -158,6 +158,16 @@ export class Storage {
   async runLifecycle(bucket) {
     return 0;
   }
+  // ---- CORS ----
+  async getBucketCors(bucket) {
+    throw notImplemented('getBucketCors');
+  }
+  async setBucketCors(bucket, rules) {
+    throw notImplemented('setBucketCors');
+  }
+  async deleteBucketCors(bucket) {
+    throw notImplemented('deleteBucketCors');
+  }
 }
 
 function notImplemented(method) {

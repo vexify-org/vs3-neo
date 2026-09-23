@@ -529,3 +529,132 @@ test('lifecycle: abort incomplete multipart uploads', async () => {
   const uploads = await client.request('GET', '/lc-mp', { query: { uploads: '' } });
   assert.ok(!uploads.text.includes(uploadId));
 });
+
+test('cors: put / get / delete configuration', async () => {
+  await client.createBucket('cors-cfg');
+
+  const missing = await client.getBucketCors('cors-cfg');
+  assert.equal(missing.status, 404);
+  assert.ok(missing.text.includes('NoSuchCORSConfiguration'));
+
+  const rules = [
+    {
+      id: 'web',
+      allowedOrigins: ['https://example.com'],
+      allowedMethods: ['GET', 'PUT'],
+      allowedHeaders: ['*'],
+      exposeHeaders: ['ETag'],
+      maxAgeSeconds: 3000,
+    },
+  ];
+  const put = await client.putBucketCors('cors-cfg', rules);
+  assert.ok(put.ok, put.text);
+
+  const get = await client.getBucketCors('cors-cfg');
+  assert.equal(get.status, 200);
+  assert.ok(get.text.includes('<ID>web</ID>'));
+  assert.ok(get.text.includes('<AllowedOrigin>https://example.com</AllowedOrigin>'));
+  assert.ok(get.text.includes('<AllowedMethod>GET</AllowedMethod>'));
+  assert.ok(get.text.includes('<AllowedMethod>PUT</AllowedMethod>'));
+  assert.ok(get.text.includes('<AllowedHeader>*</AllowedHeader>'));
+  assert.ok(get.text.includes('<ExposeHeader>ETag</ExposeHeader>'));
+  assert.ok(get.text.includes('<MaxAgeSeconds>3000</MaxAgeSeconds>'));
+
+  const del = await client.deleteBucketCors('cors-cfg');
+  assert.equal(del.status, 204);
+  const gone = await client.getBucketCors('cors-cfg');
+  assert.equal(gone.status, 404);
+});
+
+test('cors: preflight is unauthenticated and honors the rules', async () => {
+  await client.createBucket('cors-pre');
+  await client.putBucketCors('cors-pre', [
+    {
+      id: 'web',
+      allowedOrigins: ['https://example.com'],
+      allowedMethods: ['GET', 'PUT'],
+      allowedHeaders: ['x-amz-meta-*'],
+      exposeHeaders: ['ETag'],
+      maxAgeSeconds: 600,
+    },
+  ]);
+
+  const ok = await client.preflightCors('cors-pre', {
+    origin: 'https://example.com',
+    method: 'PUT',
+    headers: ['x-amz-meta-color'],
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('access-control-allow-origin'), 'https://example.com');
+  assert.equal(ok.headers.get('access-control-allow-credentials'), 'true');
+  assert.equal(ok.headers.get('access-control-max-age'), '600');
+  assert.ok(ok.headers.get('access-control-allow-methods').includes('PUT'));
+  assert.equal(ok.headers.get('access-control-allow-headers'), 'x-amz-meta-color');
+  assert.equal(ok.headers.get('access-control-expose-headers'), 'ETag');
+
+  // Disallowed origin and disallowed header both fail the preflight.
+  const badOrigin = await client.preflightCors('cors-pre', {
+    origin: 'https://evil.test',
+    method: 'PUT',
+  });
+  assert.equal(badOrigin.status, 403);
+  assert.ok(badOrigin.text.includes('AccessForbidden'));
+
+  const badHeader = await client.preflightCors('cors-pre', {
+    origin: 'https://example.com',
+    method: 'PUT',
+    headers: ['x-not-allowed'],
+  });
+  assert.equal(badHeader.status, 403);
+});
+
+test('cors: actual requests get response headers; wildcard origin returns *', async () => {
+  await client.createBucket('cors-res');
+  await client.putObject('cors-res', 'a.txt', 'hello');
+  await client.putBucketCors('cors-res', [
+    { allowedOrigins: ['https://example.com'], allowedMethods: ['GET'], exposeHeaders: ['ETag'] },
+  ]);
+
+  const allowed = await client.request('GET', '/cors-res/a.txt', {
+    headers: { Origin: 'https://example.com' },
+  });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://example.com');
+  assert.equal(allowed.headers.get('access-control-expose-headers'), 'ETag');
+
+  const denied = await client.request('GET', '/cors-res/a.txt', {
+    headers: { Origin: 'https://other.test' },
+  });
+  assert.equal(denied.status, 200);
+  assert.equal(denied.headers.get('access-control-allow-origin'), null);
+
+  // A "*" rule is echoed literally and must not advertise credentials.
+  await client.putBucketCors('cors-res', [
+    { allowedOrigins: ['*'], allowedMethods: ['GET'] },
+  ]);
+  const wild = await client.request('GET', '/cors-res/a.txt', {
+    headers: { Origin: 'https://anything.test' },
+  });
+  assert.equal(wild.headers.get('access-control-allow-origin'), '*');
+  assert.equal(wild.headers.get('access-control-allow-credentials'), null);
+});
+
+test('cors: wildcard host patterns match subdomains', async () => {
+  await client.createBucket('cors-wild');
+  await client.putBucketCors('cors-wild', [
+    { allowedOrigins: ['https://*.example.com'], allowedMethods: ['GET'] },
+  ]);
+
+  const sub = await client.preflightCors('cors-wild', {
+    origin: 'https://app.example.com',
+    method: 'GET',
+  });
+  assert.equal(sub.status, 200);
+  assert.equal(sub.headers.get('access-control-allow-origin'), 'https://app.example.com');
+
+  const other = await client.preflightCors('cors-wild', {
+    origin: 'https://example.org',
+    method: 'GET',
+  });
+  assert.equal(other.status, 403);
+});

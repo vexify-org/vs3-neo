@@ -482,6 +482,25 @@ export class MemoryStorage extends Storage {
     delete b.lifecycle;
   }
 
+  // ---- cors ----
+  async getBucketCors(bucket) {
+    const b = this.buckets.get(bucket);
+    if (!b) throw errNoSuchBucket();
+    return b.cors || [];
+  }
+
+  async setBucketCors(bucket, rules) {
+    const b = this.buckets.get(bucket);
+    if (!b) throw errNoSuchBucket();
+    b.cors = Array.isArray(rules) ? rules : [];
+  }
+
+  async deleteBucketCors(bucket) {
+    const b = this.buckets.get(bucket);
+    if (!b) throw errNoSuchBucket();
+    delete b.cors;
+  }
+
   async runLifecycle(bucket) {
     const b = this.buckets.get(bucket);
     if (!b) return 0;

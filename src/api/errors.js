@@ -17,6 +17,7 @@ import { xmlDoc, el } from '../util/xml.js';
 // S3 error catalogue: code -> HTTP status.
 export const ERROR_STATUS = {
   AccessDenied: 403,
+  AccessForbidden: 403,
   AccountProblem: 403,
   AmbiguousGrantByEmailAddress: 400,
   AuthorizationHeaderMalformed: 400,
@@ -61,6 +62,7 @@ export const ERROR_STATUS = {
   MissingSecurityHeader: 400,
   NoSuchBucket: 404,
   NoSuchBucketPolicy: 404,
+  NoSuchCORSConfiguration: 404,
   NoSuchKey: 404,
   NoSuchLifecycleConfiguration: 404,
   NoSuchTagSet: 404,

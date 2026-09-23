@@ -244,6 +244,27 @@ export function lifecycleXml(rules) {
   return xmlDoc('LifecycleConfiguration', inner);
 }
 
+// ---- CORS ----
+
+export function corsXml(rules) {
+  const inner = (rules || [])
+    .map((r) =>
+      rawEl(
+        'CORSRule',
+        (r.id ? el('ID', r.id) : '') +
+          (r.allowedOrigins || []).map((o) => el('AllowedOrigin', o)).join('') +
+          (r.allowedMethods || []).map((m) => el('AllowedMethod', m)).join('') +
+          (r.allowedHeaders || []).map((h) => el('AllowedHeader', h)).join('') +
+          (r.exposeHeaders || []).map((h) => el('ExposeHeader', h)).join('') +
+          (r.maxAgeSeconds !== undefined && r.maxAgeSeconds !== null
+            ? el('MaxAgeSeconds', String(r.maxAgeSeconds))
+            : ''),
+      ),
+    )
+    .join('');
+  return xmlDoc('CORSConfiguration', inner);
+}
+
 function quoteEtag(etag) {
   if (typeof etag === 'string' && etag.startsWith('"')) return etag;
   return `"${etag}"`;

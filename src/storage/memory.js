@@ -557,4 +557,4 @@ function streamToBuffer(stream) {
   });
 }
 
-registerBackend('memory', () => new MemoryStorage());
+registerBackend('memory', (cfg = {}) => new MemoryStorage(cfg));

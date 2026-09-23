@@ -19,6 +19,9 @@
       }
     ]
   },
+  "encryption": {
+    "key": ""
+  },
   "versioning": {
     "default": false
   },

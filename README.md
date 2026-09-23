@@ -78,7 +78,7 @@ Configuration is read from (in order of precedence):
 | `VS3_AUTH_ANONYMOUS`         | `false`             | allow unsigned requests              |
 | `VS3_AUTH_ACCESS_KEY`        | `minioadmin`        | access key (sets a single user)      |
 | `VS3_AUTH_SECRET_KEY`        | `minioadmin`        | secret key                           |
-| `VS3_ENCRYPTION_KEY`         | *(random)*          | 32-byte base64 master key for SSE-S3 |
+| `VS3_ENCRYPTION_KEY`         | *(generated)*       | SSE-S3 master key (any secret string) |
 
 Config file example (`config/vs3-neo.json`):
 
@@ -90,7 +90,7 @@ Config file example (`config/vs3-neo.json`):
     "anonymous": false,
     "users": [{ "accessKey": "minioadmin", "secretKey": "minioadmin" }]
   },
-  "encryption": { "key": "base64-32-bytes" },
+  "encryption": { "key": "" },
   "versioning": { "default": false },
   "functions": {
     "enabled": true,
@@ -199,8 +199,12 @@ AES-256-GCM; the ciphertext nonce + tag are stored in object metadata and
 decryption is transparent on `GetObject`/`HeadObject`. The `AES256`
 response header echoes the encryption state.
 
-The master key comes from `VS3_ENCRYPTION_KEY` (base64, 32 bytes) or
-`config.encryption.key`; a random ephemeral key is derived when unset.
+The master key comes from `VS3_ENCRYPTION_KEY` or `config.encryption.key`
+(any secret string — it is hashed to a 32-byte AES key). When unset, the
+`memory` backend derives a random ephemeral key and the `disk` backend
+generates one and persists it at `<dataDir>/sse-master.key`, so encrypted
+objects stay readable across restarts. Changing the key makes previously
+encrypted objects unreadable.
 
 ### Bucket policies
 

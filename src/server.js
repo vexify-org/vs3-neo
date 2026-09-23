@@ -30,7 +30,7 @@ import * as xml from './api/xml_responses.js';
 import { httpDate } from './util/xml.js';
 import { SSE_HEADER, SSE_ALGORITHM } from './util/sse.js';
 
-const VERSION = '0.1.0';
+const VERSION = '1.0.0';
 
 // Map an S3 operation name to the IAM action used for bucket-policy checks.
 const OP_ACTIONS = {

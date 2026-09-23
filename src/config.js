@@ -38,6 +38,11 @@ export const DEFAULT_CONFIG = {
     anonymous: false,
     users: [{ accessKey: 'minioadmin', secretKey: 'minioadmin' }],
   },
+  encryption: {
+    // optional SSE-S3 master key; when empty a key is generated
+    // (memory: ephemeral, disk: persisted at <dataDir>/sse-master.key)
+    key: '',
+  },
   versioning: {
     // default versioning state applied to newly created buckets
     default: false,
@@ -94,6 +99,7 @@ function applyEnv(cfg) {
       },
     ];
   }
+  if (env.VS3_ENCRYPTION_KEY) cfg.encryption.key = env.VS3_ENCRYPTION_KEY;
   return cfg;
 }
 

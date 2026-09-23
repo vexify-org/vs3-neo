@@ -24,7 +24,7 @@ function main() {
     .then(() => {
       const { host, port } = config.server;
       server.listen(port, host);
-      console.log(`vs3-neo v0.1.0 listening on http://${host}:${port}`);
+      console.log(`vs3-neo v1.0.0 listening on http://${host}:${port}`);
       console.log(`  storage backend : ${server.storage.name}`);
       console.log(`  data dir        : ${config.storage.disk ? config.storage.disk.dataDir : '(memory)'}`);
       console.log(`  anonymous       : ${config.auth.anonymous}`);
@@ -36,7 +36,9 @@ function main() {
       console.log('    GET  /__info      service info');
       console.log('    GET  /__metrics   prometheus-style metrics');
       console.log('    POST /__presign   mint a presigned URL (requires auth)');
+      console.log('    POST /__lifecycle run lifecycle rules now');
       console.log('    POST /__function/:name   invoke a user-defined function');
+      console.log('    GET  /__functions        list registered functions');
       console.log('');
     })
     .catch((err) => {

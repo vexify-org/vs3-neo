@@ -33,7 +33,7 @@ import {
   errInvalidPartOrder,
   errInvalidArgument,
 } from './storage.js';
-import { encryptFile, decryptFileToBuffer, ensureMasterKey, SSE_ALGORITHM } from '../util/sse.js';
+import { encryptFile, decryptFileToBuffer, ensureMasterKey, deriveKey, SSE_ALGORITHM } from '../util/sse.js';
 
 // The default on-disk backend. Layout under dataDir:
 //   {bucket}/bucket.json              bucket metadata
@@ -46,15 +46,18 @@ export class DiskStorage extends Storage {
     return 'disk';
   }
 
-  constructor(dataDir) {
+  constructor(dataDir, sseKey) {
     super();
     this.dataDir = dataDir;
+    this.sseKey = sseKey;
     this.masterKey = null;
   }
 
   async init() {
     await fs.mkdir(this.dataDir, { recursive: true });
-    this.masterKey = await ensureMasterKey(this.keyPath());
+    // An explicit key (VS3_ENCRYPTION_KEY / config.encryption.key) wins;
+    // otherwise generate one and persist it alongside the data.
+    this.masterKey = this.sseKey ? deriveKey(this.sseKey) : await ensureMasterKey(this.keyPath());
   }
 
   keyPath() {
@@ -854,6 +857,6 @@ class S3ErrRange extends Error {
 
 registerBackend('disk', (cfg = {}) => {
   const dataDir = cfg.dataDir || './data';
-  const inst = new DiskStorage(dataDir);
+  const inst = new DiskStorage(dataDir, cfg.sseKey);
   return inst;
 });
